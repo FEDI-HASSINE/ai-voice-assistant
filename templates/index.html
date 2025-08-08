@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI Voice Assistant</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 2em; max-width: 600px; margin: auto; }
+        button { font-size: 1.2em; padding: 0.5em 1em; }
+        #status { margin-top: 1em; font-weight: bold; }
+        #userText, #responseText { margin-top: 1em; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+    <h1>AI Voice Assistant</h1>
+    <button id="recordBtn">Start Recording</button>
+    <div id="status"></div>
+    <h3>Your question:</h3>
+    <div id="userText"></div>
+    <h3>AI response:</h3>
+    <div id="responseText"></div>
+
+    <script>
+        const recordBtn = document.getElementById('recordBtn');
+        const statusDiv = document.getElementById('status');
+        const userTextDiv = document.getElementById('userText');
+        const responseTextDiv = document.getElementById('responseText');
+
+        let mediaRecorder;
+        let audioChunks = [];
+
+        recordBtn.onclick = async () => {
+            if (recordBtn.textContent === 'Start Recording') {
+                audioChunks = [];
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                mediaRecorder.start();
+                statusDiv.textContent = "Recording... Click to stop.";
+                recordBtn.textContent = "Stop Recording";
+                mediaRecorder.ondataavailable = event => {
+                    audioChunks.push(event.data);
+                };
+                mediaRecorder.onstop = async () => {
+                    statusDiv.textContent = "Processing...";
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                    const formData = new FormData();
+                    formData.append('file', audioBlob, 'audio.wav');
+
+                    const response = await fetch('/process_audio', { method: 'POST', body: formData });
+                    const data = await response.json();
+
+                    userTextDiv.textContent = data.user_text;
+                    responseTextDiv.textContent = data.response_text;
+                    statusDiv.textContent = "Ready for new question.";
+                    recordBtn.textContent = "Start Recording";
+                };
+            } else {
+                mediaRecorder.stop();
+            }
+        };
+    </script>
+</body>
+</html>

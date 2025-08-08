@@ -1,0 +1,1 @@
+# Ici tu peux ajouter des fonctions pour interagir avec le LLM si besoin
