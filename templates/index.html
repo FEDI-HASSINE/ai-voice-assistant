@@ -37,20 +37,35 @@
                 mediaRecorder.start();
                 statusDiv.textContent = "Recording... Click to stop.";
                 recordBtn.textContent = "Stop Recording";
+
                 mediaRecorder.ondataavailable = event => {
                     audioChunks.push(event.data);
                 };
+
                 mediaRecorder.onstop = async () => {
                     statusDiv.textContent = "Processing...";
-                    const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+
+                    // Utiliser le type réel de MediaRecorder (souvent 'audio/webm;codecs=opus')
+                    const type = mediaRecorder.mimeType || 'audio/webm';
+                    const audioBlob = new Blob(audioChunks, { type });
+
                     const formData = new FormData();
-                    formData.append('file', audioBlob, 'audio.wav');
+                    // Nommer le fichier avec une extension cohérente aide côté serveur
+                    const ext = type.includes('wav') ? 'wav'
+                              : type.includes('ogg') ? 'ogg'
+                              : type.includes('mpeg') || type.includes('mp3') ? 'mp3'
+                              : 'webm';
+                    formData.append('file', audioBlob, `audio.${ext}`);
 
                     const response = await fetch('/process_audio', { method: 'POST', body: formData });
+                    if (!response.ok) {
+                        const text = await response.text();
+                        throw new Error(text || `HTTP ${response.status}`);
+                    }
                     const data = await response.json();
 
-                    userTextDiv.textContent = data.user_text;
-                    responseTextDiv.textContent = data.response_text;
+                    userTextDiv.textContent = data.user_text || '';
+                    responseTextDiv.textContent = data.response_text || '';
                     statusDiv.textContent = "Ready for new question.";
                     recordBtn.textContent = "Start Recording";
                 };
