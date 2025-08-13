@@ -1,1 +1,0 @@
-# Ici tu peux ajouter des fonctions de transcription si besoin

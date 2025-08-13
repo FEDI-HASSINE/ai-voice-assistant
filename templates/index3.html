@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Assistant IA (Vocal + Prompt)</title>
+<style>
+:root { --accent:#2563eb; --accent-2:#7c3aed; --bg:#f6f7fb; --fg:#111827; --muted:#6b7280; }
+* { box-sizing: border-box; }
+body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin:0 auto; max-width:1000px; padding:24px; color:var(--fg); background:var(--bg); }
+h1 { margin:0 0 8px 0; font-size:28px; }
+.subtitle { margin:0 0 20px 0; color:var(--muted); }
+.tabs { display:flex; gap:8px; border-bottom:1px solid #e5e7eb; margin-bottom:12px; }
+.tab { padding:10px 14px; border:1px solid #e5e7eb; border-bottom:none; border-radius:10px 10px 0 0; background:#fff; cursor:pointer; font-weight:600; color:#374151; }
+.tab.active { background:#eef2ff; color:#1e3a8a; border-color:#c7d2fe; }
+.panel { background:#fff; border:1px solid #e5e7eb; border-radius:0 10px 10px 10px; padding:16px; display:none; }
+.panel.active { display:block; }
+label { font-weight:600; display:block; margin:.6rem 0 .35rem; }
+select, textarea, input[type="text"] { width:100%; padding:.6rem .7rem; border:1px solid #e2e8f0; border-radius:10px; font:inherit; background:#fff; }
+textarea { min-height:140px; }
+button { background:var(--accent); color:#fff; border:0; padding:.65rem 1.1rem; font-size:1rem; border-radius:9px; cursor:pointer; }
+button.secondary { background:#1118270e; color:#111827; border:1px solid #e5e7eb; }
+button:disabled { opacity:.6; cursor:not-allowed; }
+.row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+pre, .card { background:#fff; border:1px solid #e5e7eb; padding:12px; border-radius:10px; }
+pre { white-space:pre-wrap; word-break:break-word; min-height:100px; }
+.small { color:var(--muted); font-size:.88rem; }
+.status { font-weight:600; margin-left:.5rem; color:#374151; }
+.warn { color:#b45309; font-size:.95rem; }
+canvas { width:100%; height:140px; background:#0b1020; border-radius:10px; display:block; }
+.toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.tag { display:inline-block; background:#eef2ff; color:#1e3a8a; border:1px solid #c7d2fe; padding:.15rem .5rem; border-radius:999px; font-size:.85rem; }
+.right { margin-left:auto; }
+.kbd { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background:#f3f4f6; border:1px solid #e5e7eb; padding:2px 6px; border-radius:6px; }
+</style>
+</head>
+<body>
+  <h1>Assistant IA <span class="tag">Modèle: {{ model }}</span></h1>
+  <p class="subtitle">Choisissez un mode: saisir un prompt ou enregistrer votre voix. Le mode vocal affiche un visu temps réel (onde/spectre de fréquences).</p>
+
+  <div class="tabs">
+    <div class="tab active" data-target="panel-prompt">Mode Prompt</div>
+    <div class="tab" data-target="panel-voice">Mode Vocal</div>
+  </div>
+
+  <!-- Panel Prompt -->
+  <div id="panel-prompt" class="panel active">
+    <label for="promptSelect">Choisir un prompt (basé sur votre CV)</label>
+    <select id="promptSelect">
+      {% for p in prompts %}
+        <option value="{{ p|e }}">{{ p }}</option>
+      {% endfor %}
+    </select>
+    <div class="small">Vous pouvez modifier le texte avant envoi.</div>
+
+    <label for="promptInput">Prompt</label>
+    <textarea id="promptInput"></textarea>
+
+    <div class="row" style="margin-top:8px;">
+      <button id="sendBtn">Envoyer au modèle</button>
+      <button id="clearBtn" class="secondary">Effacer</button>
+      <span id="statusPrompt" class="status">Prêt.</span>
+      <span class="right small">Astuce: <span class="kbd">Ctrl</span> + <span class="kbd">Enter</span> pour envoyer</span>
+    </div>
+
+    <h3>Réponse du modèle</h3>
+    <div class="toolbar">
+      <button id="copyRespBtn" class="secondary">Copier la réponse</button>
+      <span id="copyStatus" class="small"></span>
+    </div>
+    <pre id="responsePrompt">(en attente)</pre>
+  </div>
+
+  <!-- Panel Voice -->
+  <div id="panel-voice" class="panel">
+    {% if not has_whisper %}
+      <p class="warn">Le mode vocal nécessite whisper et ffmpeg:
+      <br>- pip3 install openai-whisper
+      <br>- sudo apt-get update && sudo apt-get install -y ffmpeg
+      </p>
+    {% endif %}
+
+    <div class="row">
+      <button id="recordBtn">Démarrer l’enregistrement</button>
+      <button id="toggleViewBtn" class="secondary">Spectre de fréquences</button>
+      <span id="statusVoice" class="status">Prêt.</span>
+      <span id="recTimer" class="small right">00:00</span>
+    </div>
+
+    <div class="card" style="margin:10px 0;">
+      <canvas id="scopeCanvas" width="900" height="140"></canvas>
+      <div class="row" style="margin-top:6px;">
+        <span id="audioInfo" class="small">Audio: —</span>
+        <span id="levelMeter" class="small right">Niveau: — dB</span>
+      </div>
+    </div>
+
+    <div class="row">
+      <audio id="playback" controls style="width:100%;"></audio>
+    </div>
+
+    <h3>Transcription</h3>
+    <pre id="userText">(vide)</pre>
+
+    <h3>Réponse du modèle</h3>
+    <pre id="responseVoice">(en attente)</pre>
+  </div>
+
+<script>
+/* Tabs */
+const tabs = document.querySelectorAll('.tab');
+const panels = document.querySelectorAll('.panel');
+tabs.forEach(t => t.addEventListener('click', () => {
+  tabs.forEach(x => x.classList.remove('active'));
+  panels.forEach(p => p.classList.remove('active'));
+  t.classList.add('active');
+  const target = document.getElementById(t.dataset.target);
+  if (target) target.classList.add('active');
+}));
+
+/* Prompt mode */
+const selectEl = document.getElementById('promptSelect');
+const inputEl = document.getElementById('promptInput');
+const sendBtn = document.getElementById('sendBtn');
+const clearBtn = document.getElementById('clearBtn');
+const statusPrompt = document.getElementById('statusPrompt');
+const responsePrompt = document.getElementById('responsePrompt');
+const copyRespBtn = document.getElementById('copyRespBtn');
+const copyStatus = document.getElementById('copyStatus');
+
+function hydratePrompt() { inputEl.value = selectEl.value || ''; }
+hydratePrompt();
+selectEl.addEventListener('change', hydratePrompt);
+clearBtn.addEventListener('click', () => { inputEl.value = ''; responsePrompt.textContent = '(en attente)'; statusPrompt.textContent = 'Prêt.'; });
+
+async function sendPrompt() {
+  const prompt = inputEl.value.trim();
+  if (!prompt) { statusPrompt.textContent = 'Veuillez saisir un prompt.'; return; }
+  sendBtn.disabled = true;
+  statusPrompt.textContent = 'Génération...';
+  responsePrompt.textContent = '(en cours)';
+  try {
+    const r = await fetch('/process_prompt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt })
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || data.error || 'Erreur serveur');
+    responsePrompt.textContent = data.response_text || '(réponse vide)';
+    statusPrompt.textContent = 'Prêt.';
+  } catch (e) {
+    statusPrompt.textContent = 'Erreur.';
+    responsePrompt.textContent = String(e.message || e);
+  } finally {
+    sendBtn.disabled = false;
+  }
+}
+sendBtn.addEventListener('click', sendPrompt);
+inputEl.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') sendPrompt();
+});
+copyRespBtn.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(responsePrompt.textContent || '');
+    copyStatus.textContent = 'Copié ✓';
+    setTimeout(() => (copyStatus.textContent = ''), 1500);
+  } catch { copyStatus.textContent = 'Impossible de copier.'; }
+
+/* Voice mode */
+});
+const recordBtn = document.getElementById('recordBtn');
+const toggleViewBtn = document.getElementById('toggleViewBtn');
+const statusVoice = document.getElementById('statusVoice');
+const userTextEl = document.getElementById('userText');
+const responseVoiceEl = document.getElementById('responseVoice');
+const playbackEl = document.getElementById('playback');
+const scopeCanvas = document.getElementById('scopeCanvas');
+const audioInfo = document.getElementById('audioInfo');
+const levelMeter = document.getElementById('levelMeter');
+const ctx = scopeCanvas.getContext('2d');
+
+let mediaRecorder = null;
+let audioChunks = [];
+let stream = null;
+let audioCtx = null;
+let analyser = null;
+let dataArray = null;
+let freqArray = null;
+let drawId = null;
+let showSpectrum = false;
+let startTs = 0;
+const recTimer = document.getElementById('recTimer');
+
+function fmtTime(s) {
+  const m = Math.floor(s/60).toString().padStart(2,'0');
+  const sec = Math.floor(s%60).toString().padStart(2,'0');
+  return `${m}:${sec}`;
+}
+
+function startTimer() {
+  startTs = Date.now();
+  const tick = () => {
+    if (!startTs) return;
+    const elapsed = (Date.now() - startTs) / 1000;
+    recTimer.textContent = fmtTime(elapsed);
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+function stopTimer() { startTs = 0; recTimer.textContent = '00:00'; }
+
+function draw() {
+  const W = scopeCanvas.width, H = scopeCanvas.height;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#0b1020'; ctx.fillRect(0,0,W,H);
+
+  // Mesure du niveau (RMS approx)
+  if (dataArray) {
+    analyser.getByteTimeDomainData(dataArray);
+    let sum = 0;
+    for (let i=0;i<dataArray.length;i++){ const v=(dataArray[i]-128)/128; sum += v*v; }
+    const rms = Math.sqrt(sum / dataArray.length) || 0.0001;
+    const db = (20 * Math.log10(rms)).toFixed(1);
+    levelMeter.textContent = `Niveau: ${db} dB`;
+  }
+
+  if (showSpectrum && freqArray) {
+    analyser.getByteFrequencyData(freqArray);
+    const barW = (W / freqArray.length) * 1.5;
+    for (let i=0;i<freqArray.length;i++) {
+      const val = freqArray[i] / 255;
+      const barH = val * (H - 10);
+      const x = i * barW;
+      const y = H - barH;
+      ctx.fillStyle = `hsl(${200 + 120*val}, 80%, ${40 + 20*val}%)`;
+      ctx.fillRect(x, y, barW - 2, barH);
+    }
+  } else if (dataArray) {
+    analyser.getByteTimeDomainData(dataArray);
+    ctx.lineWidth = 2; ctx.strokeStyle = '#60a5fa';
+    ctx.beginPath();
+    const slice = scopeCanvas.width / dataArray.length;
+    for (let i=0;i<dataArray.length;i++){
+      const v = dataArray[i] / 255;
+      const x = i * slice;
+      const y = v * scopeCanvas.height;
+      if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+  }
+  drawId = requestAnimationFrame(draw);
+}
+
+toggleViewBtn.addEventListener('click', () => {
+  showSpectrum = !showSpectrum;
+  toggleViewBtn.textContent = showSpectrum ? 'Onde temporelle' : 'Spectre de fréquences';
+});
+
+recordBtn?.addEventListener('click', async () => {
+  if (recordBtn.textContent === 'Démarrer l’enregistrement') {
+    audioChunks = [];
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+      statusVoice.textContent = 'Micro refusé.';
+      return;
+    }
+    // AudioContext + Analyser
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const source = audioCtx.createMediaStreamSource(stream);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 2048; // temps (1024 bins)
+    source.connect(analyser);
+    dataArray = new Uint8Array(analyser.fftSize);
+    freqArray = new Uint8Array(analyser.frequencyBinCount); // spectre (n/2)
+    audioInfo.textContent = `Audio: ${audioCtx.sampleRate} Hz • ${stream.getAudioTracks()[0]?.label || 'micro par défaut'}`;
+
+    // MediaRecorder
+    const preferredType = 'audio/webm;codecs=opus';
+    const mimeType = MediaRecorder.isTypeSupported(preferredType) ? preferredType : (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus') ? 'audio/ogg;codecs=opus' : '');
+    mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+    mediaRecorder.ondataavailable = e => { if (e.data && e.data.size) audioChunks.push(e.data); };
+    mediaRecorder.onstop = async () => {
+      try { stream.getTracks().forEach(t => t.stop()); } catch {}
+      if (audioCtx && audioCtx.state !== 'closed') { try { await audioCtx.close(); } catch {} }
+      cancelAnimationFrame(drawId);
+      drawId = null; dataArray = null; freqArray = null;
+      stopTimer();
+
+      statusVoice.textContent = 'Transcription...';
+      userTextEl.textContent = '(en cours)';
+      responseVoiceEl.textContent = '(génération...)';
+
+      try {
+        const type = mediaRecorder.mimeType || 'audio/webm';
+        const blob = new Blob(audioChunks, { type });
+        // lecture locale
+        playbackEl.src = URL.createObjectURL(blob);
+
+        const fd = new FormData();
+        const ext = type.includes('wav')?'wav':type.includes('ogg')?'ogg':type.includes('mpeg')||type.includes('mp3')?'mp3':'webm';
+        fd.append('file', blob, 'audio.'+ext);
+
+        const r = await fetch('/process_audio', { method: 'POST', body: fd });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.detail || data.error || 'Erreur serveur');
+        userTextEl.textContent = data.user_text || '(vide)';
+        responseVoiceEl.textContent = data.response_text || '(aucune réponse)';
+        statusVoice.textContent = 'Prêt.';
+      } catch (err) {
+        responseVoiceEl.textContent = '(échec)';
+        statusVoice.textContent = 'Erreur.';
+      } finally {
+        recordBtn.textContent = 'Démarrer l’enregistrement';
+      }
+    };
+
+    mediaRecorder.start();
+    statusVoice.textContent = 'Enregistrement...';
+    recordBtn.textContent = 'Arrêter';
+    startTimer();
+    draw();
+  } else {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+    statusVoice.textContent = 'Traitement...';
+    recordBtn.textContent = 'Démarrer l’enregistrement';
+  }
+});
+</script>
+</body>
+</html>
