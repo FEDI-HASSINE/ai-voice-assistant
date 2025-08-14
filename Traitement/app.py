@@ -23,7 +23,7 @@ log = logging.getLogger("ai-voice-assistant")
 # App & Templates
 # ---------------------------------------------------------------------------
 app = FastAPI()
-templates = Jinja2Templates(directory="templates")
+templates = Jinja2Templates(directory="../templates")
 
 # ---------------------------------------------------------------------------
 # Config LLM (Groq)
