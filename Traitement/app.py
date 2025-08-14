@@ -10,6 +10,15 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
+# Import company analysis functionality
+try:
+    from .company import analyze_company_website
+    COMPANY_ANALYZER_AVAILABLE = True
+except ImportError:
+    COMPANY_ANALYZER_AVAILABLE = False
+    def analyze_company_website(url: str, target_words: int = 300) -> str:
+        return "Module d'analyse d'entreprise non disponible"
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -169,6 +178,11 @@ def _transcribe(path: str) -> str:
 class PromptIn(BaseModel):
     prompt: str
 
+
+class CompanyAnalysisIn(BaseModel):
+    url: str
+    target_words: int = 300
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -183,6 +197,30 @@ async def index(request: Request):
 async def process_prompt(body: PromptIn = Body(...)):
     resp = await _call_groq_text(body.prompt)
     return JSONResponse({"prompt": body.prompt, "response_text": resp})
+
+
+@app.post("/analyze_company")
+async def analyze_company(body: CompanyAnalysisIn = Body(...)):
+    """Analyze a company website and extract information."""
+    if not COMPANY_ANALYZER_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Service d'analyse d'entreprise non disponible")
+    
+    try:
+        analysis = analyze_company_website(body.url, body.target_words)
+        return JSONResponse({
+            "url": body.url,
+            "target_words": body.target_words,
+            "analysis": analysis,
+            "success": True
+        })
+    except Exception as e:
+        log.error("Erreur analyse entreprise: %s", e)
+        return JSONResponse({
+            "url": body.url,
+            "target_words": body.target_words,
+            "analysis": f"Erreur lors de l'analyse: {str(e)[:200]}",
+            "success": False
+        }, status_code=500)
 
 @app.post("/process_audio")
 async def process_audio(file: UploadFile = File(...)):
@@ -220,4 +258,9 @@ async def process_audio(file: UploadFile = File(...)):
 
 @app.get("/healthz")
 async def healthz():
-    return {"status": "ok", "model": GROQ_MODEL, "whisper": bool(whisper_model)}
+    return {
+        "status": "ok", 
+        "model": GROQ_MODEL, 
+        "whisper": bool(whisper_model),
+        "company_analyzer": COMPANY_ANALYZER_AVAILABLE
+    }
