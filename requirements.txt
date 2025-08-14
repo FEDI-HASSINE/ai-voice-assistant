@@ -3,3 +3,9 @@ uvicorn[standard]
 whisper
 llama-cpp-python
 soundfile
+# LinkedIn scraper dependencies
+requests
+beautifulsoup4
+httpx
+lxml
+python-multipart

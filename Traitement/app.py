@@ -23,7 +23,7 @@ log = logging.getLogger("ai-voice-assistant")
 # App & Templates
 # ---------------------------------------------------------------------------
 app = FastAPI()
-templates = Jinja2Templates(directory="templates")
+templates = Jinja2Templates(directory="../templates")
 
 # ---------------------------------------------------------------------------
 # Config LLM (Groq)
@@ -169,6 +169,22 @@ def _transcribe(path: str) -> str:
 class PromptIn(BaseModel):
     prompt: str
 
+class LinkedInUrlIn(BaseModel):
+    url: str
+
+class LinkedInTextIn(BaseModel):
+    profile_text: str
+
+# ---------------------------------------------------------------------------
+# LinkedIn Integration
+# ---------------------------------------------------------------------------
+try:
+    from linkedin import scrape_linkedin_profile_async, parse_linkedin_text, format_profile_summary
+    LINKEDIN_AVAILABLE = True
+except ImportError as e:
+    log.warning(f"LinkedIn module not available: {e}")
+    LINKEDIN_AVAILABLE = False
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -217,6 +233,56 @@ async def process_audio(file: UploadFile = File(...)):
                     os.remove(p)
                 except Exception:
                     pass
+
+@app.post("/linkedin/scrape")
+async def scrape_linkedin_url(body: LinkedInUrlIn = Body(...)):
+    """Scrape LinkedIn profile from URL"""
+    if not LINKEDIN_AVAILABLE:
+        raise HTTPException(503, "LinkedIn scraper module not available")
+    
+    try:
+        profile_data = await scrape_linkedin_profile_async(body.url)
+        formatted_summary = format_profile_summary(profile_data)
+        
+        return JSONResponse({
+            "url": body.url,
+            "profile_data": profile_data,
+            "formatted_summary": formatted_summary,
+            "success": "error" not in profile_data
+        })
+    except Exception as e:
+        log.error(f"Error scraping LinkedIn URL: {e}")
+        return JSONResponse({
+            "url": body.url,
+            "error": str(e),
+            "profile_data": None,
+            "formatted_summary": None,
+            "success": False
+        }, status_code=400)
+
+@app.post("/linkedin/parse")
+async def parse_linkedin_profile_text(body: LinkedInTextIn = Body(...)):
+    """Parse LinkedIn profile from raw text"""
+    if not LINKEDIN_AVAILABLE:
+        raise HTTPException(503, "LinkedIn scraper module not available")
+    
+    try:
+        profile_data = parse_linkedin_text(body.profile_text)
+        formatted_summary = format_profile_summary(profile_data)
+        
+        return JSONResponse({
+            "profile_data": profile_data,
+            "formatted_summary": formatted_summary,
+            "success": "error" not in profile_data
+        })
+    except Exception as e:
+        log.error(f"Error parsing LinkedIn text: {e}")
+        return JSONResponse({
+            "error": str(e),
+            "profile_data": None,
+            "formatted_summary": None,
+            "success": False
+        }, status_code=400)
 
 @app.get("/healthz")
 async def healthz():
